@@ -152,12 +152,12 @@ class Plot(object):
                     from pandas.api.types import is_datetime64_any_dtype as is_datetime
                     return source.dtypes.apply(lambda x: is_datetime(x)).values
                 else:
-                    return [False]
+                    return np.array([False])
             else:
                 if source.shape[1] != 0:
                     return source.dtypes.apply(lambda x: np.issubdtype(x, dtype)).values
                 else:
-                    return [False]
+                    return np.array([False])
 
         def value_check(source):
             date_check = dtype_check(source, np.datetime64)
@@ -217,7 +217,7 @@ class Plot(object):
                 name = results.index[values].values[0]
                 source[name] = pd.to_datetime(source[name])
                 if source[name].iloc[0].year == 1970:
-                    source[name] = pd.to_datetime(source[name], units='ms')
+                    source[name] = pd.to_datetime(source[name], unit='ms')
                 source.rename(columns={name:'date'}, inplace=True)
             else:
                 raise ValueError('No column is datetime-convertible')
