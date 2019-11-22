@@ -2,8 +2,21 @@ import altair as alt
 alt.renderers.enable('notebook')
 import pandas as pd
 import numpy as np
+import warnings
 class Plot(object):
     '''
+    Key Dictionaries:
+        properties - unpacked into base of Chart().properties(**self.prop).interactive()
+        xObj - " " x=alt.X(stuff, **xObj)
+        xAxis - x=alt.X(axis=alt.Axis(**xAxis)) 
+        xScale - x=alt.X(scale=alt.Scale(**xScale))
+        yObj - y=alt.Y(**yObj)
+        yAxis - y=alt.Y(axis=alt.Axis(**xAxis))
+        yScale - y=alt.Y(scale=alt.Scale(**yScale))
+        baseMark - alt.Chart(source, mark=alt.MarkDef(**self.baseMark))
+    Key Keywords:
+        Pass in force=True which skips any intelligent data check. 
+        or verbose=False to silence all warnings
     Description:
         The plot generation consists of three calls:
             Init statement - Plot()
@@ -11,7 +24,7 @@ class Plot(object):
             Chained methods - .base(), .legend(), or .labels() - all, some, none, any order
                 Put values existing in Plot().valid_attrs in any of these methods
             Final rendering call - plot()
-                Will eventually take a save argument.
+                Takes a save argument. See save source code if you need it. 
     Examples:
         Plot(Source).plot()
             Returns basic line chart keyed on `value` or config['y']
@@ -24,13 +37,27 @@ class Plot(object):
             Then [.plot()] is always called to render the final plot.
 
     '''
-    def __init__(self, source=pd.DataFrame(), properties={}):
+    def __init__(self, 
+                 source=pd.DataFrame(), 
+                 properties={}, 
+                 xObj={},
+                 xAxis={},
+                 xScale={},
+                 yObj={},
+                 yAxis={},
+                 yScale={},
+                 baseMark={},
+                 force=False, 
+                 verbose=True):
         self._base=None
         self._legend=None
         self._labels=None
+        self._int_attrs = {'colors'}
         self.valid_attrs = {'kind', 'scale', 'format', 'zero', 'x_label', 'y_label', 'x_format', 'y_format'}
-        self.prop={'height': 200, 'width': 400, 'title': 'Plot Title'}
+        self.prop = {'height': 200, 'width': 400, 'title': 'Plot Title'}
         self.prop.update(properties)
+        self.verbose = verbose
+        self.force = force
         self.x = 'date'
         self.x_type = ':T'
         self.x_label = ''
@@ -39,32 +66,70 @@ class Plot(object):
         self.y_label = ''
         self.y_format = ''
         self.category_column = ''
-        self.source = source
+        self.source = source.copy()
         self._inspectSource(self.source)
-        self.other={}
-        self._color={}
         self.colors=None
         self.kind='line'
         self.format = 'r'
         self.scale='linear'
         self.zero=False
+        self._color={}
+        self.xObj=xObj
+        self.xAxis=xAxis
+        self.xScale=xScale
+        self.yObj=yObj
+        self.yAxis=yAxis
+        self.yScale=yScale
+        self.baseMark=baseMark
+        
+    def _check(self):
+        if self.kind=='bar' and self.zero==False:
+            self.zero=True
+        if self.kind=='bar' and self.scale=='log':
+            if self.force:
+                self.yObj.update({'stack':False})
+            if self.verbose:
+                warnings.warn('Unsafe scale for zero valued data')
+        # Any explicit properties called from self should be added here.
+        self.xObj.update({
+            
+        })
+        self.xAxis.update({
+            
+        })
+        self.xScale.update({
+            
+        })
+        self.yObj.update({
+            
+        })
+        self.yAxis.update({
+            
+        })
+        self.yScale.update({
+            
+        })
 
     def _inspectSource(self, df):
         if df.empty:
-            Source = pd.DataFrame([{'time':"2019-04-04", 'variable':'TXN Vol', 'value':40000},
-                                   {'time':"2019-04-05", 'variable':'TXN Vol', 'value':51000},
-                                   {'time':"2019-04-06", 'variable':'TXN Vol', 'value':30000},
-                                   {'time':"2019-04-04", 'variable':'Price', 'value':8502},
-                                   {'time':"2019-04-05", 'variable':'Price', 'value':7195},
-                                   {'time':"2019-04-06", 'variable':'Price', 'value':8295}])
+            Source = pd.DataFrame([{'date':"2019-04-04", 'variable':'TXN Vol', 'value':40000},
+                                   {'date':"2019-04-05", 'variable':'TXN Vol', 'value':51000},
+                                   {'date':"2019-04-06", 'variable':'TXN Vol', 'value':30000},
+                                   {'date':"2019-04-04", 'variable':'Price', 'value':8502},
+                                   {'date':"2019-04-05", 'variable':'Price', 'value':7195},
+                                   {'date':"2019-04-06", 'variable':'Price', 'value':8295}])
             self.source = Source
-            self.x='time'
+            self.x='date'
         elif len(df.columns) == 3:
-            self.source = self._meltedCheck(df)
+            if self.force:
+                self.source = df
+            else:
+                self.source = self._meltedCheck(df)
         else:
             raise NotImplementedError('Please use a melted DF.')
 
     def _parseArgs(self, call, **kwargs):
+        self._check()
         colors = kwargs.get('colors')
         if colors:
             if isinstance(colors, str):
@@ -76,17 +141,23 @@ class Plot(object):
         for k, v in kwargs.items():
             if k in self.valid_attrs:
                 setattr(self, k, v)
-        if self.kind=='bar' and self.zero==False:
-            self.zero=True
-        if self.kind=='bar' and self.scale!='linear':
-            self.other = {'stack':False}
+            else:
+                if k not in self._int_attrs:
+                    warnings.warn(f'Keyword argument {k} not yet supported. Use dict assignment.')
 
     def _meltedCheck(self, source, recall=False):
         def dtype_check(source, dtype):
-            if source.shape[1] != 0:
-                return source.dtypes.apply(lambda x: np.issubdtype(x, dtype)).values
+            if dtype == 'np.datetime64':
+                if source.shape[1] != 0:
+                    from pandas.api.types import is_datetime64_any_dtype as is_datetime
+                    return source.dtypes.apply(lambda x: is_datetime(x)).values
+                else:
+                    return np.array([False])
             else:
-                return [False]
+                if source.shape[1] != 0:
+                    return source.dtypes.apply(lambda x: np.issubdtype(x, dtype)).values
+                else:
+                    return np.array([False])
 
         def value_check(source):
             date_check = dtype_check(source, np.datetime64)
@@ -106,7 +177,9 @@ class Plot(object):
                 return False
 
         def rename_x(source):
-            valid = {'date', 'Date', 'time', 'Time', 'datetime', 'epoch_ts', 'Index'}
+            if self.verbose:
+                warnings.warn('X not called "date", renaming...')
+            valid = {'date', 'Date', 'time', 'Time', 'datetime', 'epoch_ts', 'Index', 'index'}
             target = set(source.columns).intersection(valid)
             if target:
                 if len(target) > 1:
@@ -116,10 +189,14 @@ class Plot(object):
                     if name == 'Index':
                         source.rename(columns={'Index':'date'}, inplace=True)
                         self.x_type = ':Q'
+                    elif name == 'index':
+                        source.rename(columns={'index':'date'}, inplace=True)
+                        self.x_type = ':Q'
                     else:
                         source.rename(columns={name:'date'}, inplace=True)
 
         def is_date(item):
+            # Could expand more safely. 
             try:
                 pd.to_datetime(item)
                 return True
@@ -140,7 +217,7 @@ class Plot(object):
                 name = results.index[values].values[0]
                 source[name] = pd.to_datetime(source[name])
                 if source[name].iloc[0].year == 1970:
-                    source[name] = pd.to_datetime(source[name], units='ms')
+                    source[name] = pd.to_datetime(source[name], unit='ms')
                 source.rename(columns={name:'date'}, inplace=True)
             else:
                 raise ValueError('No column is datetime-convertible')
@@ -256,17 +333,24 @@ class Plot(object):
         """
         params:
             kind: tested on line and bar
-            scale_type: linear, log...
+            scale_type: linear, log, sqrt...
         """
-        base = alt.Chart(self.source, mark=alt.MarkDef(self.kind, clip=True)).encode(
+        base = alt.Chart(self.source, mark=alt.MarkDef(self.kind, 
+                                                       clip=True, 
+                                                       **self.baseMark)).encode(
                 x=alt.X(f'{self.x + self.x_type}',
                         title=self.x_label,
-                        axis=alt.Axis(format=self.x_format,
-                                      labelAngle=-25)),
+                        scale=alt.Scale(**self.xScale),
+                        axis=alt.Axis(format=self.x_format, 
+                                      labelAngle=-25,
+                                      **self.xAxis),
+                        **self.xObj),
                 y=alt.Y(f'value:Q',
                         title=self.y_label,
-                        scale=alt.Scale(type=self.scale),
-                        **self.other),
+                        scale=alt.Scale(type=self.scale,
+                                        **self.yScale),
+                        axis=alt.Axis(**self.yAxis),
+                        **self.yObj),
                 **self._color,
         ).properties(**self.prop).interactive()
 
