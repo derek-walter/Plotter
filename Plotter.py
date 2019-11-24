@@ -1,8 +1,195 @@
 import altair as alt
-alt.renderers.enable('notebook')
+#alt.renderers.enable('notebook')
 import pandas as pd
 import numpy as np
 import warnings
+
+from pandas.api.types import is_string_dtype
+from pandas.api.types import is_numeric_dtype
+from pandas.api.types import is_datetime64_dtype
+
+class Inspect(object):
+    def __init__(self, df, columns=[]):
+        self.columns = columns
+        self.source = df.copy()
+        self.x_type = None
+
+    @staticmethod
+    def is_date(item): 
+        try:
+            pd.to_datetime(item, infer_datetime_format=True)
+            return True
+        except:
+            return False
+
+    def _inspectN(self, names):
+        has = set(self.source.columns).intersection(set(names))
+        exists = False
+        if has:
+            exists = True
+        has_mask = np.array([True if item in names else False for item in self.source.columns])
+        return exists, has, has_mask
+
+    def _inspectV(self, function):
+        has = self.source.dtypes.apply(function)
+        has_mask = has.values
+        has_names = has.index[has_mask]
+        return has, set(has_names), has_mask
+    
+    def _toDatetime(self, name):
+        temp = pd.to_datetime(self.source[name], infer_datetime_format=True, utc=False)
+        # Checks
+        if temp.iloc[0].year == 1970:
+            temp = pd.to_datetime(self.source[name], unit='ms')
+        self.source[name] = temp
+
+    '''Revalue'''
+    def _melt(self):
+        if not self.columns:
+            _, num_names, _ = self._inspectV(is_numeric_dtype)
+            names = num_names.difference({'x'})
+        else:
+            _, names, _ = self._inspectN(self.columns)
+        self.source = self.source.melt(id_vars='x', value_vars=names)
+
+    '''Select'''
+    def _inspectSource(self):
+        if self.source.shape[0] != 0:
+            if self.source.shape[1] == 3:
+                self._rename(values={})
+                _, str_names, _ = self._inspectV(is_string_dtype)
+                _, num_names, _ = self._inspectV(is_numeric_dtype)
+                # melt-like
+                if str_names and num_names:
+                    self._rename()
+                # unmelted
+                if len(num_names) == 2:
+                    self._melt()
+                    self._rename()
+            elif self.source.shape[1] == 2:
+                _, num_names, _ = self._inspectV(is_numeric_dtype)
+                _, date_names, _ = self._inspectV(is_datetime64_dtype)
+                strs, str_names, str_mask = self._inspectV(is_string_dtype)
+                str_names = strs.index[str_mask]
+                date_mask = self.source.iloc[:, str_mask].apply(self.is_date, axis=0)
+                if len(num_names) == 2:
+                    self._rename(values={})
+                    self._melt()
+                    self._rename()
+                elif len(num_names) == 1 and len(date_names) == 1:
+                    x = date_names.pop()
+                    self.rename(x, 'x')
+                    self._melt()
+                    self._rename()
+                elif any(date_mask):
+                    name = str_names[date_mask][0]
+                    self.rename(name, 'x')
+                    self._toDatetime('x')
+                    self._melt()
+                    self._rename()
+                else:
+                    raise NotImplementedError('Source types not valid yet.')
+            elif self.source.shape[1] == 1:
+                _, num_names, _ = self._inspectV(is_numeric_dtype)
+                if num_names:
+                    self.source.index.name = 'x'
+                    self.source = self.source.reset_index()
+                    self._melt()
+                    self._rename()
+                else:
+                    temp = self.source.groupby(self.source.columns[0]).count()
+                    temp.index.name = 'x'
+                    self.source = temp
+                    self._melt()
+                    self._rename()
+            else:
+                self._rename(values={})
+                self._melt()
+                self._rename()
+        else:
+            raise ValueError('DF of zero length.')
+        return self.source
+
+    '''Rename'''
+    def _rename(self, values={'variable', 'value'}):
+        # Don't forget about x_type
+        valid_out = {'x', 'variable', 'value'}
+        names = set(self.source.columns)
+        if valid_out not in names:
+            valid_index = {'Unnamed: 0', 'X', 'Index', 'index'}
+            valid_date = {'epoch_ts', 'date', 'Date', 'DATE', 'datetime', 'timestamp', 'time', 'Time', 'TIME'}
+            # X
+            if 'x' not in names:
+                has_date_column, date_columns, _ = self._inspectN(valid_date)
+                if has_date_column:
+                    if len(date_columns) > 1:
+                        warnings.warn('In Renaming: Multiple date columns found.')
+                    name = date_columns.pop()
+                    names.remove(name)
+                    self.rename(name, 'x')
+                    self.x_type = 'date'
+                else:
+                    has_index_column, index_columns, _ = self._inspectN(valid_index)
+                    if has_index_column:
+                        if len(index_columns) > 1:
+                            warnings.warn('In Renaming: Multiple index columns found.')
+                        name = index_columns.pop()
+                        names.remove(name)
+                        self.rename(name, 'x')
+                        self.x_type = 'index'
+                    else:
+                        # Search for date
+                        self.x_type = 'date'
+                        _, date_names, date_mask = self._inspectV(is_datetime64_dtype)
+                        if any(date_mask):
+                            name = date_names.pop()
+                            names.remove(name)
+                            self.rename(name, 'x')
+                        else:
+                            strs, str_names, str_mask = self._inspectV(is_string_dtype)
+                            str_names = strs.index[str_mask]
+                            date_mask = self.source.iloc[:, str_mask].apply(self.is_date, axis=0)
+                            if any(date_mask):
+                                name = str_names[date_mask][0]
+                                names.remove(name)
+                                self.rename(name, 'x')
+                                self._toDatetime('x')
+                            else:
+                                nums, num_names, num_mask = self._inspectV(is_numeric_dtype)
+                                num_names = nums.index[num_mask]
+                                date_mask = self.source.iloc[:, num_mask].apply(self.is_date, axis=0)
+                                if any(date_mask):
+                                    name = num_names[date_mask][0]
+                                    names.remove(name)
+                                    self.rename(name, 'x')
+                                    self._toDatetime('x')
+                                else:
+                                    raise ValueError('No column is datetime convertible.')
+            # Others
+            if 'variable' not in names and 'variable' in values:
+                _, str_names, str_mask = self._inspectV(is_string_dtype)
+                str_names = str_names.difference({'x'})
+                if str_names:
+                    self.rename(str_names.pop(), 'variable')
+                else:
+                    raise ValueError('No categorical column present.')
+            if 'value' not in names and 'value' in values:
+                _, num_names, num_mask = self._inspectV(is_numeric_dtype)
+                num_names = num_names.difference({'x', 'variable'})
+                if num_names:
+                    self.rename(num_names.pop(), 'value')
+                else:
+                    raise ValueError('No numeric column present.')
+    
+    def rename(self, name, new):
+        self.source.rename(columns={name: new}, inplace=True)
+
+    def all(self):
+        self._inspectSource()
+        return self.source, self.x_type
+
+
+
 class Plot(object):
     '''
     Key Dictionaries:
@@ -39,26 +226,39 @@ class Plot(object):
     '''
     def __init__(self, 
                  source=pd.DataFrame(), 
+                 columns = [],
                  properties={}, 
                  xObj={},
                  xAxis={},
                  xScale={},
                  yObj={},
                  yAxis={},
-                 yScale={},
                  baseMark={},
+                 yScale={},
+                 y2Obj={},
+                 y2Axis={},
+                 y2Scale={},
+                 base2Mark={},
+                 double=[],
+                 basicLegend=None,
                  force=False, 
                  verbose=True):
         self._base=None
         self._legend=None
         self._labels=None
+        self.colors=None
+        self.selection=None
+        self.zero=False
+        self.basicLegend=basicLegend
         self._int_attrs = {'colors'}
         self.valid_attrs = {'kind', 'scale', 'format', 'zero', 'x_label', 'y_label', 'x_format', 'y_format'}
         self.prop = {'height': 200, 'width': 400, 'title': 'Plot Title'}
         self.prop.update(properties)
+        self.double = double
         self.verbose = verbose
         self.force = force
-        self.x = 'date'
+        self.columns = columns
+        self.x = 'x'
         self.x_type = ':T'
         self.x_label = ''
         self.x_format = ''
@@ -67,12 +267,12 @@ class Plot(object):
         self.y_format = ''
         self.category_column = ''
         self.source = source.copy()
-        self._inspectSource(self.source)
-        self.colors=None
+        self._inspectSource()
         self.kind='line'
+        self._kind='line'
         self.format = 'r'
         self.scale='linear'
-        self.zero=False
+        self._scale='linear'
         self._color={}
         self.xObj=xObj
         self.xAxis=xAxis
@@ -80,9 +280,37 @@ class Plot(object):
         self.yObj=yObj
         self.yAxis=yAxis
         self.yScale=yScale
+        self.y2Obj=y2Obj
+        self.y2Axis=y2Axis
+        self.y2Scale=y2Scale
         self.baseMark=baseMark
+        self.base2Mark=base2Mark
         
     def _check(self):
+        if isinstance(self.scale, tuple):
+            if self.double:
+                if len(self.scale) == 2:
+                    left, right = self.scale
+                    self.scale=left
+                    self._scale=right
+                else:
+                    raise ValueError('Scale parameter unknown')
+            else:
+                warnings.warn('Scale suggests double Y, but axes not mentioned. Syntax: double=[list of items], kind=(type, type), scale=(type, type)')
+                if len(self.scale) >= 1:
+                    self.scale = self.scale[0]
+        if isinstance(self.kind, tuple):
+            if self.double:
+                if len(self.kind) == 2:
+                    left, right = self.kind
+                    self.kind=left
+                    self._kind=right
+                else:
+                    raise ValueError('Kind parameter unknown')
+            else:
+                warnings.warn('Kind suggests double Y, but axes not mentioned. Syntax: double=[list of items], kind=(type, type), scale=(type, type)')
+                if len(self.kind) >= 1:
+                    self.kind = self.kind[0]
         if self.kind=='bar' and self.zero==False:
             self.zero=True
         if self.kind=='bar' and self.scale=='log':
@@ -109,9 +337,38 @@ class Plot(object):
         self.yScale.update({
             
         })
+        self.baseMark.update({
+            
+        })
+        self.y2Obj.update({
+            
+        })
+        self.y2Axis.update({
+            
+        })
+        self.y2Scale.update({
+            
+        })
+        self.base2Mark.update({
+            
+        })
+        
+    def _queries(self, items, name='variable'):
+        _query = lambda xs: ' | '.join(['datum.{0} == "{1}"'.format(name, x) for x in xs])
+        wanted = set(items)
+        have = set(self.source[name].unique())
+        if len(wanted.intersection(have)) > 0:
+            other = have.difference(set(items))
+            print(wanted, other)
+            if wanted and other:
+                return _query(other), _query(wanted)
+            else:
+                raise ValueError('Not enough unique values for double Y.')
+        else:
+            raise ValueError('Double values not in variable column.')
 
-    def _inspectSource(self, df):
-        if df.empty:
+    def _inspectSource(self):
+        if self.source.empty:
             Source = pd.DataFrame([{'date':"2019-04-04", 'variable':'TXN Vol', 'value':40000},
                                    {'date':"2019-04-05", 'variable':'TXN Vol', 'value':51000},
                                    {'date':"2019-04-06", 'variable':'TXN Vol', 'value':30000},
@@ -119,17 +376,16 @@ class Plot(object):
                                    {'date':"2019-04-05", 'variable':'Price', 'value':7195},
                                    {'date':"2019-04-06", 'variable':'Price', 'value':8295}])
             self.source = Source
-            self.x='date'
-        elif len(df.columns) == 3:
-            if self.force:
-                self.source = df
-            else:
-                self.source = self._meltedCheck(df)
+            self.x='x'
+        if not self.force:
+            self.source, x_type = Inspect(self.source, self.columns).all()
+            if x_type == 'index':
+                self.x_type = ':Q'
         else:
-            raise NotImplementedError('Please use a melted DF.')
+            if len(self.source.columns) != 3:
+                raise NotImplementedError('Please use a melted DF if forcing.')
 
     def _parseArgs(self, call, **kwargs):
-        self._check()
         colors = kwargs.get('colors')
         if colors:
             if isinstance(colors, str):
@@ -138,6 +394,7 @@ class Plot(object):
                 self.colors = {'range':colors}
         if not self.colors:
             self.colors = {'scheme':'blues'}
+        self._check()
         for k, v in kwargs.items():
             if k in self.valid_attrs:
                 setattr(self, k, v)
@@ -145,114 +402,16 @@ class Plot(object):
                 if k not in self._int_attrs:
                     warnings.warn(f'Keyword argument {k} not yet supported. Use dict assignment.')
 
-    def _meltedCheck(self, source, recall=False):
-        def dtype_check(source, dtype):
-            if dtype == 'np.datetime64':
-                if source.shape[1] != 0:
-                    from pandas.api.types import is_datetime64_any_dtype as is_datetime
-                    return source.dtypes.apply(lambda x: is_datetime(x)).values
-                else:
-                    return np.array([False])
-            else:
-                if source.shape[1] != 0:
-                    return source.dtypes.apply(lambda x: np.issubdtype(x, dtype)).values
-                else:
-                    return np.array([False])
-
-        def value_check(source):
-            date_check = dtype_check(source, np.datetime64)
-            if any(date_check):
-                nex = source.iloc[:, ~date_check]
-                str_check = dtype_check(nex, np.object_)
-                if any(str_check):
-                    nex = nex.iloc[:, ~str_check]
-                    val_check = dtype_check(nex, np.number)
-                    if any(val_check):
-                        return True
-
-        def name_check(source):
-            if set(source.columns) == {'date', 'variable', 'value'}:
-                return True
-            else:
-                return False
-
-        def rename_x(source):
-            if self.verbose:
-                warnings.warn('X not called "date", renaming...')
-            valid = {'date', 'Date', 'time', 'Time', 'datetime', 'epoch_ts', 'Index', 'index'}
-            target = set(source.columns).intersection(valid)
-            if target:
-                if len(target) > 1:
-                    raise ValueError('Multiple x\'s found.')
-                else:
-                    name = target.pop()
-                    if name == 'Index':
-                        source.rename(columns={'Index':'date'}, inplace=True)
-                        self.x_type = ':Q'
-                    elif name == 'index':
-                        source.rename(columns={'index':'date'}, inplace=True)
-                        self.x_type = ':Q'
-                    else:
-                        source.rename(columns={name:'date'}, inplace=True)
-
-        def is_date(item):
-            # Could expand more safely. 
-            try:
-                pd.to_datetime(item)
-                return True
-            except:
-                return False
-
-        def find_date(source):
-            mask = dtype_check(source, np.object_)
-            if any(mask):
-                return source.iloc[:, mask].apply(is_date, axis=0)
-            else:
-                return pd.Series([False])
-
-        def revalue_x(source):
-            results = find_date(source)
-            values = results.values
-            if any(values):
-                name = results.index[values].values[0]
-                source[name] = pd.to_datetime(source[name])
-                if source[name].iloc[0].year == 1970:
-                    source[name] = pd.to_datetime(source[name], unit='ms')
-                source.rename(columns={name:'date'}, inplace=True)
-            else:
-                raise ValueError('No column is datetime-convertible')
-
-        def revalue(source):
-            def find_object(source, ob):
-                mask = dtype_check(source, ob)
-                return source.iloc[:, mask].columns[0]
-            name = find_object(source, np.object_)
-            source.rename(columns={name:'variable'}, inplace=True)
-            name = find_object(source, np.number)
-            source.rename(columns={name:'value'}, inplace=True)
-
-        # Main
-        if value_check(source):
-            if name_check(source):
-                return source
-            else:
-                if len(set(source.columns).union({'variable', 'value'})) == 2:
-                    rename_x(source)
-                    if name_check(source):
-                        return source
-                    else:
-                        raise ValueError('X value not understood.')
-                else:
-                    revalue(source)
-                    return self._meltedCheck(source, recall=True)
-        else:
-            revalue_x(source)
-            if not recall:
-                return self._meltedCheck(source, recall=True)
-            else:
-                raise ValueError('X value not convertible')
-
-
+    def _addColor(self):
+        # Note, color is a dict, selector is an Altair object
+        if not self.selection:
+            selection = alt.selection_multi(fields=['variable'])
+            color = alt.condition(selection,
+                              alt.Color('variable:N', scale=alt.Scale(**self.colors), legend=None),
+                              alt.value('#f2f2f2'))
+            self.selection=selection
+            self._color={'color':color}
+        
     def info(self):
         print(self.source)
         print(self.prop)
@@ -260,12 +419,16 @@ class Plot(object):
         return self
 
     def plot(self, save=False, filepath='', **kwargs):
-        if not self._base:
-            self.base()
         if self._legend:
+            self.base()
             self._base = alt.hconcat(self._base, self._legend)
+        else:
+            self._color = {'color':alt.Color('variable', scale=alt.Scale(**self.colors), legend=self.basicLegend)}
+            self.base()
         if self._labels:
             self._base = alt.vconcat(self._labels, self._base)
+        if not self._base:
+            self.base()
         if not save:
             return self._base
         else:
@@ -278,15 +441,6 @@ class Plot(object):
             else:
                 raise ValueError('Filepath empty, are you trying to save? Extra args are passed into altair\'s save method.')
 
-
-    def _addColor(self):
-        # Note, color is a dict, selector is an Altair object
-        selection = alt.selection_multi(fields=['variable'])
-        color = alt.condition(selection,
-                          alt.Color('variable:N', scale=alt.Scale(**self.colors), legend=None),
-                          alt.value('#f2f2f2'))
-        self._color={'color':color}
-        self.selection=selection
 
     def labels(self, **kwargs):
         self._parseArgs(call='labels', **kwargs)
@@ -307,12 +461,10 @@ class Plot(object):
         if self.prop.get('title'):
             self.prop.pop('title')
         self._labels = labels
-        self.base()
         return self
 
     def legend(self, **kwargs):
         self._parseArgs(call='legend', **kwargs)
-
         self._addColor()
         legend = alt.Chart(self.source).mark_point(size=250, shape='square').encode(
                 y=alt.Y(f'variable:N',
@@ -325,34 +477,78 @@ class Plot(object):
             height=self.prop.get('height'),
         ).add_selection(self.selection)
         self._legend = legend
-        self.base()
         return self
 
     def base(self, **kwargs):
         self._parseArgs(call='base', **kwargs)
-        """
-        params:
-            kind: tested on line and bar
-            scale_type: linear, log, sqrt...
-        """
-        base = alt.Chart(self.source, mark=alt.MarkDef(self.kind, 
-                                                       clip=True, 
-                                                       **self.baseMark)).encode(
-                x=alt.X(f'{self.x + self.x_type}',
+        if self.double:
+            return self._double()
+        else:
+            base = alt.Chart(self.source, mark=alt.MarkDef(self.kind, 
+                                                           clip=True, 
+                                                           **self.baseMark)).encode(
+                    x=alt.X(f'{self.x + self.x_type}',
+                            title=self.x_label,
+                            scale=alt.Scale(**self.xScale),
+                            axis=alt.Axis(format=self.x_format, 
+                                          labelAngle=-25,
+                                          **self.xAxis),
+                            **self.xObj),
+                    y=alt.Y(f'value:Q',
+                            title=self.y_label,
+                            scale=alt.Scale(type=self.scale,
+                                            **self.yScale),
+                            axis=alt.Axis(**self.yAxis),
+                            **self.yObj),
+                    **self._color,
+            ).properties(**self.prop).interactive()
+            self._base = base
+            return self
+    
+    def _double(self):     
+        if isinstance(self.double, str):
+            first, other = self._queries([self.double])
+        elif isinstance(self.double, list) or isinstance(self.double, set):
+            first, other = self._queries(self.double)
+        else:
+            raise ValueError('Double arguments not understood.')
+        chart_one = alt.Chart(self.source, mark=alt.MarkDef(self.kind,
+                                                     clip=True,
+                                                     **self.baseMark)).encode(
+            x=alt.X(f'{self.x + self.x_type}',
                         title=self.x_label,
                         scale=alt.Scale(**self.xScale),
                         axis=alt.Axis(format=self.x_format, 
                                       labelAngle=-25,
                                       **self.xAxis),
                         **self.xObj),
-                y=alt.Y(f'value:Q',
+            y=alt.Y(f'value:Q',
                         title=self.y_label,
                         scale=alt.Scale(type=self.scale,
                                         **self.yScale),
                         axis=alt.Axis(**self.yAxis),
                         **self.yObj),
-                **self._color,
-        ).properties(**self.prop).interactive()
+            **self._color,
+        ).transform_filter(first)
 
-        self._base = base
+        chart_two = alt.Chart(self.source, mark=alt.MarkDef(self._kind,
+                                                            clip=True,
+                                                            **self.base2Mark)).encode(
+            x=alt.X(f'{self.x + self.x_type}',
+                        title=self.x_label,
+                        scale=alt.Scale(**self.xScale),
+                        axis=alt.Axis(format=self.x_format, 
+                                      labelAngle=-25,
+                                      **self.xAxis),
+                        **self.xObj),
+            y=alt.Y(f'value:Q',
+                        title=self.y_label,
+                        scale=alt.Scale(type=self._scale,
+                                        **self.y2Scale),
+                        axis=alt.Axis(**self.y2Axis),
+                        **self.y2Obj),
+            **self._color,
+        ).transform_filter(other)
+
+        self._base = alt.layer(chart_one, chart_two).properties(**self.prop).resolve_scale(y='independent').interactive()
         return self
