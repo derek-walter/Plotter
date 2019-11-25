@@ -265,6 +265,7 @@ class Plot(object):
         self.x_format = ''
         self.y = ''
         self.y_label = ''
+        self._y_label = ''
         self.y_format = ''
         self.category_column = ''
         self.source = source.copy()
@@ -312,6 +313,18 @@ class Plot(object):
                 warnings.warn('Kind suggests double Y, but axes not mentioned. Syntax: double=[list of items], kind=(type, type), scale=(type, type)')
                 if len(self.kind) >= 1:
                     self.kind = self.kind[0]
+        if isinstance(self.y_label, tuple):
+            if self.double:
+                if len(self.y_label) == 2:
+                    left, right = self.y_label
+                    self.y_label=left
+                    self._y_label=right
+                else:
+                    raise ValueError('Label parameter unknown')
+            else:
+                warnings.warn('Y Label suggests double Y, but axes not mentioned. Syntax: double=[list of items], y_label=(type, type)')
+                if len(self.y_label) >= 1:
+                    self.y_label = self.y_label[0]
         #if self.kind=='bar' and self.zero==False:
         #    self.zero=True
         #if self.kind=='bar' and self.scale=='log':
@@ -549,7 +562,7 @@ class Plot(object):
                                       **self.xAxis),
                         **self.xObj),
             y=alt.Y(f'value:Q',
-                        title=self.y_label,
+                        title=self._y_label,
                         scale=alt.Scale(type=self._scale,
                                         **self.y2Scale),
                         axis=alt.Axis(**self.y2Axis),
