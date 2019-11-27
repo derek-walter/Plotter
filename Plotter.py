@@ -249,6 +249,7 @@ class Plot(object):
         self.colors=None
         self.selection=None
         self.zero=False
+        self.calls = set()
         self.basicLegend=basicLegend
         self._int_attrs = {'colors'}
         self.valid_attrs = {'kind', 'scale', 'format', 'zero', 'x_label', 'y_label', 'x_format', 'y_format'}
@@ -264,6 +265,7 @@ class Plot(object):
         self.x_format = ''
         self.y = ''
         self.y_label = ''
+        self._y_label = ''
         self.y_format = ''
         self.category_column = ''
         self.source = source.copy()
@@ -311,13 +313,25 @@ class Plot(object):
                 warnings.warn('Kind suggests double Y, but axes not mentioned. Syntax: double=[list of items], kind=(type, type), scale=(type, type)')
                 if len(self.kind) >= 1:
                     self.kind = self.kind[0]
-        if self.kind=='bar' and self.zero==False:
-            self.zero=True
-        if self.kind=='bar' and self.scale=='log':
-            if self.force:
-                self.yObj.update({'stack':False})
-            if self.verbose:
-                warnings.warn('Unsafe scale for zero valued data')
+        if isinstance(self.y_label, tuple):
+            if self.double:
+                if len(self.y_label) == 2:
+                    left, right = self.y_label
+                    self.y_label=left
+                    self._y_label=right
+                else:
+                    raise ValueError('Label parameter unknown')
+            else:
+                warnings.warn('Y Label suggests double Y, but axes not mentioned. Syntax: double=[list of items], y_label=(type, type)')
+                if len(self.y_label) >= 1:
+                    self.y_label = self.y_label[0]
+        #if self.kind=='bar' and self.zero==False:
+        #    self.zero=True
+        #if self.kind=='bar' and self.scale=='log':
+        #    if self.force:
+        #        self.yObj.update({'stack':False})
+        #    if self.verbose:
+        #        warnings.warn('Unsafe scale for zero valued data')
         # Any explicit properties called from self should be added here.
         self.xObj.update({
             
@@ -359,7 +373,6 @@ class Plot(object):
         have = set(self.source[name].unique())
         if len(wanted.intersection(have)) > 0:
             other = have.difference(set(items))
-            print(wanted, other)
             if wanted and other:
                 return _query(other), _query(wanted)
             else:
@@ -386,6 +399,7 @@ class Plot(object):
                 raise NotImplementedError('Please use a melted DF if forcing.')
 
     def _parseArgs(self, call, **kwargs):
+        self.calls.add(call)
         colors = kwargs.get('colors')
         if colors:
             if isinstance(colors, str):
@@ -394,7 +408,6 @@ class Plot(object):
                 self.colors = {'range':colors}
         if not self.colors:
             self.colors = {'scheme':'blues'}
-        self._check()
         for k, v in kwargs.items():
             if k in self.valid_attrs:
                 setattr(self, k, v)
@@ -419,16 +432,21 @@ class Plot(object):
         return self
 
     def plot(self, save=False, filepath='', **kwargs):
-        if self._legend:
-            self.base()
-            self._base = alt.hconcat(self._base, self._legend)
+        self._check()
+        if 'base' not in self.calls:
+            self._parseArgs(call='base', **kwargs)
+        if 'legend' in self.calls:
+            self.legend(internal=True)
         else:
             self._color = {'color':alt.Color('variable', scale=alt.Scale(**self.colors), legend=self.basicLegend)}
-            self.base()
-        if self._labels:
-            self._base = alt.vconcat(self._labels, self._base)
+        if 'labels' in self.calls:
+            self.labels(internal=True)
         if not self._base:
-            self.base()
+            self.base(internal=True)
+        if 'legend' in self.calls:
+            self._base = alt.hconcat(self._base, self._legend)
+        if 'labels' in self.calls:
+            self._base = alt.vconcat(self._labels, self._base)
         if not save:
             return self._base
         else:
@@ -442,68 +460,70 @@ class Plot(object):
                 raise ValueError('Filepath empty, are you trying to save? Extra args are passed into altair\'s save method.')
 
 
-    def labels(self, **kwargs):
+    def labels(self, internal=False, **kwargs):
         self._parseArgs(call='labels', **kwargs)
-
-        temp = self.source.groupby('variable').last().reset_index()
-        labels = alt.Chart(temp).mark_text(baseline='middle',
-                                           color='black',
-                                           size=14).encode(
-                x=alt.X('variable:O',
-                        axis=alt.Axis(orient='top',
-                                      labelAngle=0,
-                                      ticks=False),
-                        title=None),
-                text=alt.Text(f'value:Q',
-                              format=self.format)).properties(width=self.prop.get('width'),
-                                                      height=30,
-                                                      title=self.prop.get('title', 'Title Needed'))
-        if self.prop.get('title'):
-            self.prop.pop('title')
-        self._labels = labels
+        if internal:
+            temp = self.source.groupby('variable').last().reset_index()
+            labels = alt.Chart(temp).mark_text(baseline='middle',
+                                               color='black',
+                                               size=14).encode(
+                    x=alt.X('variable:O',
+                            axis=alt.Axis(orient='top',
+                                          labelAngle=0,
+                                          ticks=False),
+                            title=None),
+                    text=alt.Text(f'value:Q',
+                                  format=self.format)).properties(width=self.prop.get('width'),
+                                                          height=30,
+                                                          title=self.prop.get('title', 'Title Needed'))
+            if self.prop.get('title'):
+                self.prop.pop('title')
+            self._labels = labels
         return self
 
-    def legend(self, **kwargs):
+    def legend(self, internal=False, **kwargs):
         self._parseArgs(call='legend', **kwargs)
-        self._addColor()
-        legend = alt.Chart(self.source).mark_point(size=250, shape='square').encode(
-                y=alt.Y(f'variable:N',
-                        axis=alt.Axis(orient='right',
-                                      grid=False),
-                        title=''),
-                **self._color
-        ).properties(
-            width=30,
-            height=self.prop.get('height'),
-        ).add_selection(self.selection)
-        self._legend = legend
+        if internal:
+            self._addColor()
+            legend = alt.Chart(self.source).mark_point(size=250, shape='square').encode(
+                    y=alt.Y(f'variable:N',
+                            axis=alt.Axis(orient='right',
+                                          grid=False),
+                            title=''),
+                    **self._color
+            ).properties(
+                width=30,
+                height=self.prop.get('height'),
+            ).add_selection(self.selection)
+            self._legend = legend
         return self
 
-    def base(self, **kwargs):
+    def base(self, internal=False, **kwargs):
         self._parseArgs(call='base', **kwargs)
-        if self.double:
-            return self._double()
-        else:
-            base = alt.Chart(self.source, mark=alt.MarkDef(self.kind, 
-                                                           clip=True, 
-                                                           **self.baseMark)).encode(
-                    x=alt.X(f'{self.x + self.x_type}',
-                            title=self.x_label,
-                            scale=alt.Scale(**self.xScale),
-                            axis=alt.Axis(format=self.x_format, 
-                                          labelAngle=-25,
-                                          **self.xAxis),
-                            **self.xObj),
-                    y=alt.Y(f'value:Q',
-                            title=self.y_label,
-                            scale=alt.Scale(type=self.scale,
-                                            **self.yScale),
-                            axis=alt.Axis(**self.yAxis),
-                            **self.yObj),
-                    **self._color,
-            ).properties(**self.prop).interactive()
-            self._base = base
-            return self
+        if internal:
+            if self.double:
+                return self._double()
+            else:
+                base = alt.Chart(self.source, mark=alt.MarkDef(self.kind, 
+                                                               clip=True, 
+                                                               **self.baseMark)).encode(
+                        x=alt.X(f'{self.x + self.x_type}',
+                                title=self.x_label,
+                                scale=alt.Scale(**self.xScale),
+                                axis=alt.Axis(format=self.x_format, 
+                                              labelAngle=-25,
+                                              **self.xAxis),
+                                **self.xObj),
+                        y=alt.Y(f'value:Q',
+                                title=self.y_label,
+                                scale=alt.Scale(type=self.scale,
+                                                **self.yScale),
+                                axis=alt.Axis(**self.yAxis),
+                                **self.yObj),
+                        **self._color,
+                ).properties(**self.prop).interactive()
+                self._base = base
+        return self
     
     def _double(self):     
         if isinstance(self.double, str):
@@ -542,7 +562,7 @@ class Plot(object):
                                       **self.xAxis),
                         **self.xObj),
             y=alt.Y(f'value:Q',
-                        title=self.y_label,
+                        title=self._y_label,
                         scale=alt.Scale(type=self._scale,
                                         **self.y2Scale),
                         axis=alt.Axis(**self.y2Axis),
