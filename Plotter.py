@@ -267,6 +267,7 @@ class Plot(object):
         self.y_label = ''
         self._y_label = ''
         self.y_format = ''
+        self._y_format = ''
         self.category_column = ''
         self.source = source.copy()
         self._inspectSource()
@@ -325,6 +326,18 @@ class Plot(object):
                 warnings.warn('Y Label suggests double Y, but axes not mentioned. Syntax: double=[list of items], y_label=(type, type)')
                 if len(self.y_label) >= 1:
                     self.y_label = self.y_label[0]
+        if isinstance(self.y_format, tuple):
+            if self.double:
+                if len(self.y_format) == 2:
+                    left, right = self.y_format
+                    self.y_format=left
+                    self._y_format=right
+                else:
+                    raise ValueError('Label parameter unknown')
+            else:
+                warnings.warn('Y Label suggests double Y, but axes not mentioned. Syntax: double=[list of items], y_label=(type, type)')
+                if len(self.y_format) >= 1:
+                    self.y_format = self.y_format[0]
         #if self.kind=='bar' and self.zero==False:
         #    self.zero=True
         #if self.kind=='bar' and self.scale=='log':
@@ -518,7 +531,7 @@ class Plot(object):
                                 title=self.y_label,
                                 scale=alt.Scale(type=self.scale,
                                                 **self.yScale),
-                                axis=alt.Axis(**self.yAxis),
+                                axis=alt.Axis(format=self.y_format, **self.yAxis),
                                 **self.yObj),
                         **self._color,
                 ).properties(**self.prop).interactive()
@@ -546,7 +559,7 @@ class Plot(object):
                         title=self.y_label,
                         scale=alt.Scale(type=self.scale,
                                         **self.yScale),
-                        axis=alt.Axis(**self.yAxis),
+                        axis=alt.Axis(format=self.y_format, **self.yAxis),
                         **self.yObj),
             **self._color,
         ).transform_filter(first)
@@ -565,7 +578,7 @@ class Plot(object):
                         title=self._y_label,
                         scale=alt.Scale(type=self._scale,
                                         **self.y2Scale),
-                        axis=alt.Axis(**self.y2Axis),
+                        axis=alt.Axis(format=self._y_format, **self.y2Axis),
                         **self.y2Obj),
             **self._color,
         ).transform_filter(other)
