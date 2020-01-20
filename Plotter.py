@@ -227,19 +227,19 @@ class Plot(object):
                  columns = [],
                  properties={}, 
                  xObj={},
-                 xAxis={},
-                 xScale={},
                  yObj={},
-                 yAxis={},
-                 baseMark={},
-                 legendMark={},
-                 labelsAxis={},
-                 textMark={},
-                 yScale={},
                  y2Obj={},
+                 xAxis={},
+                 yAxis={},
                  y2Axis={},
+                 labelsAxis={},
+                 xScale={},
+                 yScale={},
                  y2Scale={},
+                 baseMark={},
                  base2Mark={},
+                 legendMark={},
+                 textMark={},
                  double=[],
                  basicLegend=None,
                  force=False, 
@@ -254,8 +254,6 @@ class Plot(object):
         self.basicLegend=basicLegend
         self._int_attrs = {'colors'}
         self.valid_attrs = {'kind', 'scale', 'format', 'zero', 'x_label', 'y_label', 'x_format', 'y_format', 'date_label', 'timezone'}
-        self.prop = {'height': 200, 'width': 600, 'title': 'Plot Title'}
-        self.prop.update(properties)
         self.double = double
         self.verbose = verbose
         self.force = force
@@ -281,20 +279,44 @@ class Plot(object):
         self.scale='linear'
         self._scale='linear'
         self._color={}
-        self.xObj=xObj
-        self.xAxis=xAxis
-        self.xScale=xScale
-        self.yObj=yObj
-        self.yAxis=yAxis
-        self.yScale=yScale
-        self.y2Obj=y2Obj
-        self.y2Axis=y2Axis
-        self.y2Scale=y2Scale
-        self.baseMark=baseMark
-        self.legendMark=legendMark
-        self.labelsAxis=labelsAxis
-        self.textMark=textMark
-        self.base2Mark=base2Mark
+        # Dicts
+        self.prop = {'height': 200, 'width': 600, 'title': 'Plot Title'}
+        self.xObj = {}
+        self.yObj = {}
+        self.y2Obj = {}
+        # Axes
+        self.xAxis = {'labelAngle':-25}
+        self.yAxis = {}
+        self.y2Axis = {}
+        self.labelsAxis = {'orient':'top', 'labelAngle':0, 'ticks':False}
+        # Scales
+        self.xScale = {}
+        self.yScale = {}
+        self.y2Scale = {}
+        # Marks
+        self.baseMark = {'clip':True}
+        self.base2Mark = {'clip':True}
+        self.legendMark = {'size':250, 'shape':'circle', 'filled':True}
+        self.textMark = {'baseline':'middle', 'color':'black', 'size':14}
+        # Redeclarations
+        self.prop.update(properties)
+        self.xObj.update(xObj)
+        self.yObj.update(yObj)
+        self.y2Obj.update(y2Obj)
+        # Axes
+        self.xAxis.update(xAxis)
+        self.yAxis.update(yAxis)
+        self.y2Axis.update(y2Axis)
+        self.labelsAxis.update(labelsAxis)
+        # Scales
+        self.xScale.update(xScale)
+        self.yScale.update(yScale)
+        self.y2Scale.update(y2Scale)
+        # Marks
+        self.baseMark.update(baseMark)
+        self.base2Mark.update(base2Mark)
+        self.legendMark.update(legendMark)
+        self.textMark.update(textMark)
         
     def _check(self):
         if isinstance(self.scale, tuple):
@@ -345,55 +367,7 @@ class Plot(object):
                 warnings.warn('Y Label suggests double Y, but axes not mentioned. Syntax: double=[list of items], y_label=(type, type)')
                 if len(self.y_format) >= 1:
                     self.y_format = self.y_format[0]
-        # Any explicit properties called from self should be added here.
-        self.xObj.update({
-            
-        })
-        self.xAxis.update({
-            'labelAngle':-25
-        })
-        self.xScale.update({
-            
-        })
-        self.yObj.update({
-            
-        })
-        self.yAxis.update({
-            
-        })
-        self.yScale.update({
-            
-        })
-        self.baseMark.update({
-            'clip':True
-        })
-        self.legendMark.update({
-            'size':250, 
-            'shape':'circle', 
-            'filled':True
-        })
-        self.textMark.update({
-            'baseline':'middle',
-            'color':'black',
-            'size':14
-        })
-        self.labelsAxis.update({
-            'orient':'top',
-            'labelAngle':0,
-            'ticks':False
-        })
-        self.y2Obj.update({
-            
-        })
-        self.y2Axis.update({
-            
-        })
-        self.y2Scale.update({
-            
-        })
-        self.base2Mark.update({
-            'clip':True
-        })
+        
         
     def _queries(self, items, name='variable'):
         _query = lambda xs: ' | '.join(['datum.{0} == "{1}"'.format(name, x) for x in xs])
