@@ -229,6 +229,7 @@ class Plot(object):
                  xObj={},
                  yObj={},
                  y2Obj={},
+                 colorObj={},
                  xAxis={},
                  yAxis={},
                  y2Axis={},
@@ -249,11 +250,12 @@ class Plot(object):
         self._labels=None
         self.colors=None
         self.selection=None
-        self.zero=False
+        self.zero=True
+        self.order=None
         self.calls = set()
         self.basicLegend=basicLegend
         self._int_attrs = {'colors'}
-        self.valid_attrs = {'kind', 'scale', 'format', 'zero', 'x_label', 'y_label', 'x_format', 'y_format', 'date_label', 'timezone'}
+        self.valid_attrs = {'kind', 'scale', 'format', 'zero', 'order', 'x_label', 'y_label', 'x_format', 'y_format', 'date_label', 'timezone'}
         self.double = double
         self.verbose = verbose
         self.force = force
@@ -284,6 +286,7 @@ class Plot(object):
         self.xObj = {}
         self.yObj = {}
         self.y2Obj = {}
+        self.colorObj = {'legend':None}
         # Axes
         self.xAxis = {'labelAngle':-25}
         self.yAxis = {}
@@ -291,7 +294,7 @@ class Plot(object):
         self.labelsAxis = {'orient':'top', 'labelAngle':0, 'ticks':False}
         # Scales
         self.xScale = {}
-        self.yScale = {}
+        self.yScale = {'zero':False}
         self.y2Scale = {}
         # Marks
         self.baseMark = {'clip':True}
@@ -303,6 +306,7 @@ class Plot(object):
         self.xObj.update(xObj)
         self.yObj.update(yObj)
         self.y2Obj.update(y2Obj)
+        self.colorObj.update(colorObj)
         # Axes
         self.xAxis.update(xAxis)
         self.yAxis.update(yAxis)
@@ -403,6 +407,24 @@ class Plot(object):
 
     def _parseArgs(self, call, **kwargs):
         self.calls.add(call)
+        zero = kwargs.get('zero')
+        if isinstance(zero, bool):
+            self.yScale.update({'zero':zero})
+        order = kwargs.get('order')
+        if order or isinstance(order, bool):
+            if isinstance(order, bool):
+                if order:
+                    order = sorted(list(self.source['variable'].unique()))
+                else:
+                    order = sorted(list(self.source['variable'].unique()), reverse=True)
+            elif isinstance(order, (list, set)):
+                if set(order).issubset(set(self.source['variable'].unique())):
+                    order = list(order)
+                else:
+                    raise ValueError('One or more of order items not in variable column')
+            else:
+                raise ValueError('Order keyword not understood')
+            self.colorObj.update({'sort':order})
         colors = kwargs.get('colors')
         if colors:
             if isinstance(colors, str):
@@ -423,7 +445,7 @@ class Plot(object):
         if not self.selection:
             selection = alt.selection_multi(fields=['variable'])
             color = alt.condition(selection,
-                              alt.Color('variable:N', scale=alt.Scale(**self.colors), legend=None),
+                              alt.Color('variable:N', scale=alt.Scale(**self.colors), **self.colorObj),
                               alt.value('#f2f2f2'))
             self.selection=selection
             self._color={'color':color}
@@ -441,7 +463,11 @@ class Plot(object):
         if 'legend' in self.calls:
             self.legend(internal=True)
         else:
-            self._color = {'color':alt.Color('variable', scale=alt.Scale(**self.colors), legend=self.basicLegend)}
+            self.colorObj.pop('legend')
+            self._color = {'color':alt.Color('variable', 
+                                             scale=alt.Scale(**self.colors), 
+                                             legend=self.basicLegend, 
+                                             **self.colorObj)}
         if 'labels' in self.calls:
             self.labels(internal=True)
         if not self._base:
